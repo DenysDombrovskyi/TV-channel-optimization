@@ -3,6 +3,24 @@ from scipy.optimize import linprog
 import matplotlib.pyplot as plt
 import sys
 
+def display_logo():
+    """
+    Виводить текстовий логотип Dentsu X на початку програми.
+    """
+    logo = r"""
+██████╗  █████╗ ███╗   ██╗████████╗██╗   ██╗ ██╗
+██╔════╝ ██╔══██╗████╗  ██║╚══██╔══╝╚██╗ ██╔╝██╔╝
+██║  ██╗ ███████║██╔██╗ ██║   ██║    ╚████╔╝ ██║
+██║  ╚██╗██╔══██║██║╚██╗██║   ██║     ╚██╔╝  ██║
+╚██████╔╝██║  ██║██║ ╚████║   ██║      ██║   ██║
+ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝      ╚═╝   ╚═╝
+  TV Channel Optimization Tool by Dentsu X
+    """
+    print(logo)
+    print("-" * 50)
+    print("Ласкаво просимо до програми оптимізації рекламних кампаній!")
+    print("-" * 50)
+
 def save_results_to_excel(results_df, file_name):
     """
     Зберігає результати оптимізації у файл Excel.
@@ -57,8 +75,17 @@ def plot_split_comparison(results_df, title):
 def optimize_split(standard_data_dict, user_aff_dict, budget, buying_audiences, optimization_goal, optimization_mode):
     """
     Основна функція для оптимізації канального спліта з урахуванням різних режимів.
+    
+    Параметри:
+    - standard_data_dict (dict): Словник зі стандартними даними.
+    - user_aff_dict (dict): Словник з даними Aff від користувача.
+    - budget (int): Загальний рекламний бюджет.
+    - buying_audiences (dict): Словник {СХ: БА}.
+    - optimization_goal (str): 'Aff' або 'TRP'.
+    - optimization_mode (str): 'per_sh' або 'total'.
     """
     
+    # Об'єднання всіх даних в один DataFrame для зручності
     all_data = pd.DataFrame()
     for sales_house in standard_data_dict:
         try:
@@ -83,9 +110,11 @@ def optimize_split(standard_data_dict, user_aff_dict, budget, buying_audiences, 
 
     all_results = pd.DataFrame()
     
+    # Режим "Оптимізація по кожному СХ окремо"
     if optimization_mode == 'per_sh':
         print("\nВибрано режим: Оптимізація по кожному СХ окремо.")
         
+        # Розрахунок загального стандартного бюджету для визначення частки кожного СХ
         total_standard_budget = (all_data['TRP'] * all_data['Ціна']).sum()
 
         for sales_house, group_df in all_data.groupby('СХ'):
@@ -121,6 +150,7 @@ def optimize_split(standard_data_dict, user_aff_dict, budget, buying_audiences, 
             else:
                 print(f"❌ Помилка оптимізації для {sales_house}:", result.message)
 
+    # Режим "Оптимізація по всьому бюджету"
     elif optimization_mode == 'total':
         print("\nВибрано режим: Оптимізація по всьому бюджету.")
         
@@ -182,6 +212,8 @@ def optimize_split(standard_data_dict, user_aff_dict, budget, buying_audiences, 
 
 # --- Інтерактивне використання ---
 if __name__ == "__main__":
+    display_logo()
+
     # Дані для різних СХ та БА (залишаються всередині коду)
     standard_data_by_sh = {
         'Sirius': {
