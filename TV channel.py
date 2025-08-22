@@ -3,8 +3,6 @@ from scipy.optimize import linprog
 import matplotlib.pyplot as plt
 import sys
 import os
-import tkinter as tk
-from tkinter import filedialog
 
 def display_logo():
     """
@@ -131,6 +129,7 @@ def optimize_split(all_data, budget, buying_audiences, optimization_goal, optimi
             b_lower = -group_df['Нижня межа'].values
             A_upper = pd.get_dummies(group_df['Канал']).mul(group_df['Ціна'], axis=0).values
             b_upper = group_df['Верхня межа'].values
+            
             A_group = [A_ub_group[0]] + list(A_lower) + list(A_upper)
             b_group = b_ub_group + list(b_lower) + list(b_upper)
             
@@ -207,24 +206,13 @@ def optimize_split(all_data, budget, buying_audiences, optimization_goal, optimi
 if __name__ == "__main__":
     display_logo()
 
-    # 1. Запит на вибір файлу через вікно
-    print("Будь ласка, оберіть ваш Excel-файл у вікні, що з'явиться.")
-    
-    root = tk.Tk()
-    root.withdraw() # Заховати головне вікно Tkinter
-    excel_file = filedialog.askopenfilename(
-        title="Оберіть файл Excel",
-        filetypes=[("Excel files", "*.xlsx *.xlsm")]
-    )
-    
-    if not excel_file:
-        print("❌ Файл не обрано. Програму завершено.")
-        sys.exit()
-
-    standard_df, aff_df = load_data_from_excel(excel_file)
-    
-    if standard_df is None or aff_df is None:
-        sys.exit()
+    # 1. Запит на введення імені файлу
+    while True:
+        excel_file = input("Будь ласка, введіть повну назву вашого Excel-файлу (наприклад, 'data.xlsx'): ")
+        standard_df, aff_df = load_data_from_excel(excel_file)
+        if standard_df is not None and aff_df is not None:
+            break
+        print("Будь ласка, спробуйте ще раз.")
 
     # Об'єднання завантажених даних
     all_data_merged = pd.merge(standard_df, aff_df, on='Канал')
