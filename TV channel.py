@@ -1,5 +1,6 @@
 import pandas as pd
 from scipy.optimize import linprog
+import matplotlib.pyplot as plt
 
 def save_results_to_excel(results_df, file_name):
     """
@@ -11,29 +12,69 @@ def save_results_to_excel(results_df, file_name):
     except Exception as e:
         print(f"\n❌ Помилка при збереженні файлу: {e}")
 
-def optimize_split_by_sales_house_and_ba(standard_data_dict, user_aff_dict, budget, buying_audiences):
+def plot_split_comparison(results_df, title):
     """
-    Оптимізує канальний спліт окремо по кожному СХ, враховуючи допустимі відхилення
-    та вибрану баїнгову аудиторію.
+    Будує діаграми для порівняння сплітів.
+    """
+    # Обчислення частки бюджету
+    results_df['Доля стандартного бюджету'] = (results_df['Стандартний бюджет'] / results_df['Стандартний бюджет'].sum()) * 100
+    results_df['Доля оптимізованого бюджету'] = (results_df['Оптимальний бюджет'] / results_df['Оптимальний бюджет'].sum()) * 100
+    
+    fig, axes = plt.subplots(1, 2, figsize=(18, 8))
+    fig.suptitle(f'Оптимізація канального спліта: {title}', fontsize=16)
 
+    # Графік 1: Розподіл частки бюджету
+    axes[0].set_title('Порівняння частки бюджету (%)')
+    labels = results_df['Канал']
+    standard_share = results_df['Доля стандартного бюджету']
+    optimal_share = results_df['Доля оптимізованого бюджету']
+    
+    x = range(len(labels))
+    width = 0.35
+    
+    rects1 = axes[0].bar(x, standard_share, width, label='Стандартний спліт', color='gray')
+    rects2 = axes[0].bar([p + width for p in x], optimal_share, width, label='Оптимізований спліт', color='skyblue')
+
+    axes[0].set_ylabel('Частка бюджету, %')
+    axes[0].set_xticks([p + width / 2 for p in x])
+    axes[0].set_xticklabels(labels, rotation=45, ha="right")
+    axes[0].legend()
+    axes[0].grid(axis='y', linestyle='--', alpha=0.7)
+    
+    # Графік 2: Кількість слотів
+    axes[1].set_title('Кількість слотів (Оптимізований спліт)')
+    optimal_slots = results_df['Оптимальні слоти']
+    
+    axes[1].bar(labels, optimal_slots, color='skyblue')
+    axes[1].set_ylabel('Кількість слотів')
+    axes[1].set_xticklabels(labels, rotation=45, ha="right")
+    axes[1].grid(axis='y', linestyle='--', alpha=0.7)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.show()
+
+def optimize_split_by_sales_house_and_ba(standard_data_dict, user_aff_dict, budget, buying_audiences, optimization_goal):
+    """
+    Оптимізує канальний спліт окремо по кожному СХ, враховуючи допустимі відхилення,
+    вибрану БА та ціль оптимізації.
+    
     Параметри:
     - standard_data_dict (dict): Словник зі стандартними даними для кожного СХ.
     - user_aff_dict (dict): Словник з даними Aff від користувача для кожного СХ.
     - budget (int): Загальний рекламний бюджет.
-    - buying_audiences (dict): Словник, де ключ - це СХ, а значення - вибрана БА.
-
-    Повертає:
-    - DataFrame з оптимальним розподілом або None у разі помилки.
+    - buying_audiences (dict): Словник {СХ: БА}.
+    - optimization_goal (str): 'Aff' або 'TRP'.
     """
     all_results = pd.DataFrame()
     
     # Розрахунок загального стандартного бюджету для визначення частки кожного СХ
     total_standard_budget = 0
     for sales_house in standard_data_dict:
-        ba_key = buying_audiences[sales_house]
-        df = pd.DataFrame(standard_data_dict[sales_house])
-        df['Стандартний бюджет'] = df[f'TRP_{ba_key}'] * df[f'Ціна_{ba_key}']
-        total_standard_budget += df['Стандартний бюджет'].sum()
+        ba_key = buying_audiences.get(sales_house)
+        if ba_key:
+            df = pd.DataFrame(standard_data_dict[sales_house])
+            df['Стандартний бюджет'] = df[f'TRP_{ba_key}'] * df[f'Ціна_{ba_key}']
+            total_standard_budget += df['Стандартний бюджет'].sum()
 
     for sales_house in standard_data_dict:
         try:
@@ -54,7 +95,6 @@ def optimize_split_by_sales_house_and_ba(standard_data_dict, user_aff_dict, budg
             merged_df['TRP'] = merged_df[f'TRP_{ba_key}']
             
             print(f"✅ Починаємо оптимізацію для СХ: {sales_house} з БА: {ba_key}")
-            print(merged_df[['Канал', 'СХ', 'Ціна', 'TRP']])
             print("-" * 30)
 
         except KeyError:
@@ -79,7 +119,8 @@ def optimize_split_by_sales_house_and_ba(standard_data_dict, user_aff_dict, budg
         merged_df['Верхня межа'] = merged_df['Стандартний бюджет'] * (1 + merged_df['Відхилення'])
 
         # 3. Налаштування параметрів для оптимізації
-        c = -merged_df['Aff'].values
+        goal_key = optimization_goal
+        c = -merged_df[goal_key].values
         
         A_ub_group = [merged_df['Ціна'].values]
         b_ub_group = [group_budget]
@@ -114,7 +155,7 @@ def optimize_split_by_sales_house_and_ba(standard_data_dict, user_aff_dict, budg
             print(f"❌ Помилка оптимізації для {sales_house}:", result.message)
             print("-" * 30)
     
-    # 6. Підсумки по всій кампанії та експорт
+    # 6. Підсумки та експорт
     if not all_results.empty:
         total_optimized_cost = all_results['Оптимальний бюджет'].sum()
         total_optimized_aff = (all_results['Оптимальні слоти'] * all_results['Aff']).sum()
@@ -126,20 +167,22 @@ def optimize_split_by_sales_house_and_ba(standard_data_dict, user_aff_dict, budg
         print(f"  - Загальний TRP: {total_optimized_trp:.2f}")
         print("-" * 30)
         
-        # Експорт результатів у файл
-        save_results_to_excel(all_results, 'Оптимізація_спліта_результати.xlsx')
+        save_results_to_excel(all_results[['Канал', 'СХ', 'Ціна', 'TRP', 'Aff', 'Стандартний бюджет', 'Оптимальний бюджет', 'Оптимальні слоти', 'Оптимальна доля (%)']], f'Оптимізація_результати_{optimization_goal}.xlsx')
+        
+        plot_split_comparison(all_results, f"Оптимізація за {optimization_goal}")
     
     return all_results
 
-# --- Приклад використання з імітацією вибору БА ---
+# --- Приклад використання ---
+# 1. Імітація даних для різних СХ та БА (як окремі словники)
 standard_data_by_sh = {
     'Sirius': {
-        'Канал': ['ICTV', 'СТБ', 'НОВИЙ', 'ТЕТ', 'ОЦЕ', 'МЕГА', 'ICTV2'],
+        'Канал': ['ICTV', 'СТБ', 'НОВИЙ', 'ICTV2', 'ТЕТ', 'ОЦЕ', 'МЕГА'],
         'СХ': ['Sirius'] * 7,
-        'Ціна_All 18-60': [18000, 10000, 11000, 9500, 7000, 8000, 12500],
-        'TRP_All 18-60': [25.0, 15.0, 18.0, 10.0, 8.0, 11.0, 16.0],
-        'Ціна_W 30+': [19500, 11000, 12500, 10500, 7500, 8800, 13500],
-        'TRP_W 30+': [22.0, 14.0, 17.0, 9.5, 7.5, 10.5, 15.0]
+        'Ціна_All 18-60': [18000, 10000, 11000, 12500, 9500, 7000, 8000],
+        'TRP_All 18-60': [25.0, 15.0, 18.0, 16.0, 10.0, 8.0, 11.0],
+        'Ціна_W 30+': [19500, 11000, 12500, 13500, 10500, 7500, 8800],
+        'TRP_W 30+': [22.0, 14.0, 17.0, 15.0, 9.5, 7.5, 10.5]
     },
     'Space': {
         'Канал': ['ПЛЮСПЛЮС', 'БІГУДІ', 'Kvartal-TV', 'УНІАН'],
@@ -153,8 +196,8 @@ standard_data_by_sh = {
 
 user_aff_by_sh = {
     'Sirius': {
-        'Канал': ['ICTV', 'СТБ', 'НОВИЙ', 'ТЕТ', 'ОЦЕ', 'МЕГА', 'ICTV2'],
-        'Aff': [95.0, 85.5, 90.1, 88.0, 78.9, 80.0, 92.5]
+        'Канал': ['ICTV', 'СТБ', 'НОВИЙ', 'ICTV2', 'ТЕТ', 'ОЦЕ', 'МЕГА'],
+        'Aff': [95.0, 85.5, 90.1, 92.5, 88.0, 78.9, 80.0]
     },
     'Space': {
         'Канал': ['ПЛЮСПЛЮС', 'БІГУДІ', 'Kvartal-TV', 'УНІАН'],
@@ -162,12 +205,13 @@ user_aff_by_sh = {
     }
 }
 
-# 2. Імітація вибору БА користувачем (у реальному додатку це був би випадаючий список)
+# 2. Імітація вибору БА та цілі оптимізації
 buying_audiences_choice = {
     'Sirius': 'All 18-60',
     'Space': 'W 30+'
 }
+total_budget = 500000
+goal = 'Aff' # Змініть на 'TRP', щоб оптимізувати за TRP
 
 # 3. Виклик функції оптимізації
-total_budget = 500000
-optimize_split_by_sales_house_and_ba(standard_data_by_sh, user_aff_by_sh, total_budget, buying_audiences_choice)
+optimize_split_by_sales_house_and_ba(standard_data_by_sh, user_aff_by_sh, total_budget, buying_audiences_choice, goal)
