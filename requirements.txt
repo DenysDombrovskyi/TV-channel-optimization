@@ -1,4 +1,2 @@
-scipy
-matplotlib
-openpyxl
+plot
 pandas
