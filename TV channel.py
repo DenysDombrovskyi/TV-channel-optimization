@@ -1,6 +1,7 @@
 import pandas as pd
 from scipy.optimize import linprog
 import matplotlib.pyplot as plt
+import sys
 
 def save_results_to_excel(results_df, file_name):
     """
@@ -56,17 +57,8 @@ def plot_split_comparison(results_df, title):
 def optimize_split(standard_data_dict, user_aff_dict, budget, buying_audiences, optimization_goal, optimization_mode):
     """
     Основна функція для оптимізації канального спліта з урахуванням різних режимів.
-    
-    Параметри:
-    - standard_data_dict (dict): Словник зі стандартними даними.
-    - user_aff_dict (dict): Словник з даними Aff від користувача.
-    - budget (int): Загальний рекламний бюджет.
-    - buying_audiences (dict): Словник {СХ: БА}.
-    - optimization_goal (str): 'Aff' або 'TRP'.
-    - optimization_mode (str): 'per_sh' або 'total'.
     """
     
-    # Об'єднання всіх даних в один DataFrame для зручності
     all_data = pd.DataFrame()
     for sales_house in standard_data_dict:
         try:
@@ -91,11 +83,9 @@ def optimize_split(standard_data_dict, user_aff_dict, budget, buying_audiences, 
 
     all_results = pd.DataFrame()
     
-    # Режим "Оптимізація по кожному СХ окремо"
     if optimization_mode == 'per_sh':
         print("\nВибрано режим: Оптимізація по кожному СХ окремо.")
         
-        # Розрахунок загального стандартного бюджету для визначення частки кожного СХ
         total_standard_budget = (all_data['TRP'] * all_data['Ціна']).sum()
 
         for sales_house, group_df in all_data.groupby('СХ'):
@@ -131,7 +121,6 @@ def optimize_split(standard_data_dict, user_aff_dict, budget, buying_audiences, 
             else:
                 print(f"❌ Помилка оптимізації для {sales_house}:", result.message)
 
-    # Режим "Оптимізація по всьому бюджету"
     elif optimization_mode == 'total':
         print("\nВибрано режим: Оптимізація по всьому бюджету.")
         
@@ -172,7 +161,6 @@ def optimize_split(standard_data_dict, user_aff_dict, budget, buying_audiences, 
         total_optimized_aff = (all_results['Оптимальні слоти'] * all_results['Aff']).sum()
         total_optimized_trp = (all_results['Оптимальні слоти'] * all_results['TRP']).sum()
         
-        # Додано розрахунок TRP спліту
         all_results['TRP_оптимізований_спліт (%)'] = (all_results['Оптимальні слоти'] * all_results['TRP'] / total_optimized_trp) * 100
 
         print("\n📊 Загальні підсумкові показники по всій кампанії:")
@@ -181,4 +169,92 @@ def optimize_split(standard_data_dict, user_aff_dict, budget, buying_audiences, 
         print(f"  - Загальний TRP: {total_optimized_trp:.2f}")
         print("-" * 30)
         
-        # Вивід результатів,
+        print("\n📄 Результати оптимізації:")
+        print(all_results[['Канал', 'СХ', 'Оптимальний бюджет', 'TRP_оптимізований_спліт (%)']])
+        print("-" * 30)
+
+        file_name = f'Оптимізація_результати_{optimization_mode}_{optimization_goal}.xlsx'
+        save_results_to_excel(all_results[['Канал', 'СХ', 'Ціна', 'TRP', 'Aff', 'Стандартний бюджет', 'Оптимальний бюджет', 'Оптимальні слоти', 'TRP_оптимізований_спліт (%)']], file_name)
+        
+        plot_split_comparison(all_results, f"Оптимізація за {optimization_goal} ({'всього' if optimization_mode == 'total' else 'по СХ'})")
+    
+    return all_results
+
+# --- Інтерактивне використання ---
+if __name__ == "__main__":
+    # Дані для різних СХ та БА (залишаються всередині коду)
+    standard_data_by_sh = {
+        'Sirius': {
+            'Канал': ['ICTV', 'СТБ', 'НОВИЙ', 'ICTV2', 'ТЕТ', 'ОЦЕ', 'МЕГА'],
+            'СХ': ['Sirius'] * 7,
+            'Ціна_All 18-60': [18000, 10000, 11000, 12500, 9500, 7000, 8000],
+            'TRP_All 18-60': [25.0, 15.0, 18.0, 16.0, 10.0, 8.0, 11.0],
+            'Ціна_W 30+': [19500, 11000, 12500, 13500, 10500, 7500, 8800],
+            'TRP_W 30+': [22.0, 14.0, 17.0, 15.0, 9.5, 7.5, 10.5]
+        },
+        'Space': {
+            'Канал': ['ПЛЮСПЛЮС', 'БІГУДІ', 'Kvartal-TV', 'УНІАН'],
+            'СХ': ['Space'] * 4,
+            'Ціна_All 18-60': [6000, 5000, 4500, 3500],
+            'TRP_All 18-60': [7.0, 6.0, 5.0, 4.0],
+            'Ціна_W 30+': [6500, 5500, 5000, 4000],
+            'TRP_W 30+': [6.5, 5.5, 4.5, 3.5]
+        }
+    }
+
+    user_aff_by_sh = {
+        'Sirius': {
+            'Канал': ['ICTV', 'СТБ', 'НОВИЙ', 'ICTV2', 'ТЕТ', 'ОЦЕ', 'МЕГА'],
+            'Aff': [95.0, 85.5, 90.1, 92.5, 88.0, 78.9, 80.0]
+        },
+        'Space': {
+            'Канал': ['ПЛЮСПЛЮС', 'БІГУДІ', 'Kvartal-TV', 'УНІАН'],
+            'Aff': [87.0, 81.5, 75.0, 70.0]
+        }
+    }
+
+    # 1. Запит даних у користувача
+    print("🎬 Налаштування параметрів оптимізації:")
+
+    # Вибір БА
+    all_sh = list(standard_data_by_sh.keys())
+    buying_audiences_choice = {}
+    for sh in all_sh:
+        available_ba = [k.replace('Ціна_', '') for k in standard_data_by_sh[sh].keys() if 'Ціна_' in k]
+        print(f"\nДля СХ '{sh}' доступні БА: {', '.join(available_ba)}")
+        ba_choice = input(f"Оберіть БА для СХ '{sh}': ")
+        if ba_choice not in available_ba:
+            print(f"❌ Некоректна БА. Використано першу доступну: '{available_ba[0]}'")
+            ba_choice = available_ba[0]
+        buying_audiences_choice[sh] = ba_choice
+    
+    # Введення бюджету
+    while True:
+        try:
+            total_budget = int(input("\nВведіть загальний рекламний бюджет (наприклад, 500000): "))
+            if total_budget <= 0:
+                print("❌ Бюджет повинен бути додатним числом. Спробуйте ще раз.")
+                continue
+            break
+        except ValueError:
+            print("❌ Введіть, будь ласка, числове значення.")
+
+    # Вибір мети
+    while True:
+        goal = input("Оберіть мету оптимізації ('Aff' або 'TRP'): ").strip().lower()
+        if goal in ['aff', 'trp']:
+            break
+        else:
+            print("❌ Некоректна мета. Введіть 'Aff' або 'TRP'.")
+    
+    # Вибір режиму
+    while True:
+        mode = input("Оберіть режим оптимізації ('total' - для всієї кампанії, 'per_sh' - по кожному СХ): ").strip().lower()
+        if mode in ['total', 'per_sh']:
+            break
+        else:
+            print("❌ Некоректний режим. Введіть 'total' або 'per_sh'.")
+
+    # 2. Виклик функції оптимізації з введеними параметрами
+    print("\n🚀 Запуск оптимізації...")
+    optimize_split(standard_data_by_sh, user_aff_by_sh, total_budget, buying_audiences_choice, goal.upper(), mode)
