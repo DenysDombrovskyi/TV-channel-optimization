@@ -53,113 +53,127 @@ def plot_split_comparison(results_df, title):
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.show()
 
-def optimize_split_by_sales_house_and_ba(standard_data_dict, user_aff_dict, budget, buying_audiences, optimization_goal):
+def optimize_split(standard_data_dict, user_aff_dict, budget, buying_audiences, optimization_goal, optimization_mode):
     """
-    Оптимізує канальний спліт окремо по кожному СХ, враховуючи допустимі відхилення,
-    вибрану БА та ціль оптимізації.
+    Основна функція для оптимізації канального спліта з урахуванням різних режимів.
     
     Параметри:
-    - standard_data_dict (dict): Словник зі стандартними даними для кожного СХ.
-    - user_aff_dict (dict): Словник з даними Aff від користувача для кожного СХ.
+    - standard_data_dict (dict): Словник зі стандартними даними.
+    - user_aff_dict (dict): Словник з даними Aff від користувача.
     - budget (int): Загальний рекламний бюджет.
     - buying_audiences (dict): Словник {СХ: БА}.
     - optimization_goal (str): 'Aff' або 'TRP'.
+    - optimization_mode (str): 'per_sh' або 'total'.
     """
-    all_results = pd.DataFrame()
     
-    # Розрахунок загального стандартного бюджету для визначення частки кожного СХ
-    total_standard_budget = 0
-    for sales_house in standard_data_dict:
-        ba_key = buying_audiences.get(sales_house)
-        if ba_key:
-            df = pd.DataFrame(standard_data_dict[sales_house])
-            df['Стандартний бюджет'] = df[f'TRP_{ba_key}'] * df[f'Ціна_{ba_key}']
-            total_standard_budget += df['Стандартний бюджет'].sum()
-
+    # Об'єднання всіх даних в один DataFrame для зручності
+    all_data = pd.DataFrame()
     for sales_house in standard_data_dict:
         try:
-            # 1. Завантаження даних та об'єднання
-            ba_key = buying_audiences.get(sales_house)
-            if not ba_key:
-                print(f"Помилка: Не вказана баїнгова аудиторія для {sales_house}.")
-                continue
-
             standard_df = pd.DataFrame(standard_data_dict[sales_house])
             user_df = pd.DataFrame(user_aff_dict[sales_house])
-            
-            # Об'єднання даних
             merged_df = pd.merge(standard_df, user_df, on='Канал')
             
-            # Вибір колонок TRP і Ціна відповідно до вибраної БА
-            merged_df['Ціна'] = merged_df[f'Ціна_{ba_key}']
-            merged_df['TRP'] = merged_df[f'TRP_{ba_key}']
+            ba_key = buying_audiences.get(sales_house)
+            if ba_key:
+                merged_df['Ціна'] = merged_df[f'Ціна_{ba_key}']
+                merged_df['TRP'] = merged_df[f'TRP_{ba_key}']
             
-            print(f"✅ Починаємо оптимізацію для СХ: {sales_house} з БА: {ba_key}")
-            print("-" * 30)
-
+            all_data = pd.concat([all_data, merged_df], ignore_index=True)
+            
         except KeyError:
             print(f"Помилка: Немає даних для БА '{ba_key}' або СХ '{sales_house}'.")
-            continue
-        except Exception as e:
-            print(f"Помилка при обробці даних: {e}")
-            continue
+            return None
+    
+    if all_data.empty:
+        print("Помилка: Не вдалося завантажити дані для оптимізації.")
+        return None
 
-        # 2. Розрахунок стандартних часток та меж відхилень
-        merged_df['Стандартний бюджет'] = merged_df['TRP'] * merged_df['Ціна']
+    all_results = pd.DataFrame()
+    
+    # Режим "Оптимізація по кожному СХ окремо"
+    if optimization_mode == 'per_sh':
+        print("\nВибрано режим: Оптимізація по кожному СХ окремо.")
         
-        group_standard_budget = merged_df['Стандартний бюджет'].sum()
-        group_budget = (group_standard_budget / total_standard_budget) * budget
+        # Розрахунок загального стандартного бюджету для визначення частки кожного СХ
+        total_standard_budget = (all_data['TRP'] * all_data['Ціна']).sum()
 
-        merged_df['Доля по бюджету (%)'] = (merged_df['Стандартний бюджет'] / group_standard_budget) * 100
+        for sales_house, group_df in all_data.groupby('СХ'):
+            print(f"✅ Проводимо оптимізацію для СХ: {sales_house}")
+            
+            group_standard_budget = (group_df['TRP'] * group_df['Ціна']).sum()
+            group_budget = (group_standard_budget / total_standard_budget) * budget
+            
+            group_df['Стандартний бюджет'] = group_df['TRP'] * group_df['Ціна']
+            group_df['Доля по бюджету (%)'] = (group_df['Стандартний бюджет'] / group_df['Стандартний бюджет'].sum()) * 100
+            
+            group_df['Відхилення'] = group_df.apply(lambda row: 0.20 if row['Доля по бюджету (%)'] >= 10 else 0.30, axis=1)
+            group_df['Нижня межа'] = group_df['Стандартний бюджет'] * (1 - group_df['Відхилення'])
+            group_df['Верхня межа'] = group_df['Стандартний бюджет'] * (1 + group_df['Відхилення'])
+            
+            c = -group_df[optimization_goal].values
+            A_ub_group = [group_df['Ціна'].values]
+            b_ub_group = [group_budget]
+            A_lower = -pd.get_dummies(group_df['Канал']).mul(group_df['Ціна'], axis=0).values
+            b_lower = -group_df['Нижня межа'].values
+            A_upper = pd.get_dummies(group_df['Канал']).mul(group_df['Ціна'], axis=0).values
+            b_upper = group_df['Верхня межа'].values
+            A_group = [A_ub_group[0]] + list(A_lower) + list(A_upper)
+            b_group = b_ub_group + list(b_lower) + list(b_upper)
+            
+            result = linprog(c, A_ub=A_group, b_ub=b_group, bounds=(0, None))
+            
+            if result.success:
+                optimal_slots = result.x.round(0).astype(int)
+                group_df['Оптимальні слоти'] = optimal_slots
+                group_df['Оптимальний бюджет'] = optimal_slots * group_df['Ціна']
+                all_results = pd.concat([all_results, group_df])
+            else:
+                print(f"❌ Помилка оптимізації для {sales_house}:", result.message)
+
+    # Режим "Оптимізація по всьому бюджету"
+    elif optimization_mode == 'total':
+        print("\nВибрано режим: Оптимізація по всьому бюджету.")
         
-        merged_df['Відхилення'] = merged_df.apply(
-            lambda row: 0.20 if row['Доля по бюджету (%)'] >= 10 else 0.30, axis=1
-        )
-        merged_df['Нижня межа'] = merged_df['Стандартний бюджет'] * (1 - merged_df['Відхилення'])
-        merged_df['Верхня межа'] = merged_df['Стандартний бюджет'] * (1 + merged_df['Відхилення'])
-
-        # 3. Налаштування параметрів для оптимізації
-        goal_key = optimization_goal
-        c = -merged_df[goal_key].values
+        all_data['Стандартний бюджет'] = all_data['TRP'] * all_data['Ціна']
+        total_standard_budget = all_data['Стандартний бюджет'].sum()
         
-        A_ub_group = [merged_df['Ціна'].values]
-        b_ub_group = [group_budget]
+        all_data['Доля по бюджету (%)'] = (all_data['Стандартний бюджет'] / total_standard_budget) * 100
         
-        A_lower_bound_group = -pd.get_dummies(merged_df['Канал']).mul(merged_df['Ціна'], axis=0).values
-        b_lower_bound_group = -merged_df['Нижня межа'].values
+        all_data['Відхилення'] = all_data.apply(lambda row: 0.20 if row['Доля по бюджету (%)'] >= 10 else 0.30, axis=1)
+        all_data['Нижня межа'] = all_data['Стандартний бюджет'] * (1 - all_data['Відхилення'])
+        all_data['Верхня межа'] = all_data['Стандартний бюджет'] * (1 + all_data['Відхилення'])
 
-        A_upper_bound_group = pd.get_dummies(merged_df['Канал']).mul(merged_df['Ціна'], axis=0).values
-        b_upper_bound_group = merged_df['Верхня межа'].values
-
-        A_group = [A_ub_group[0]] + list(A_lower_bound_group) + list(A_upper_bound_group)
-        b_group = b_ub_group + list(b_lower_bound_group) + list(b_upper_bound_group)
+        c = -all_data[optimization_goal].values
         
-        bounds_group = [(0, None)] * len(merged_df)
-
-        # 4. Виконання оптимізації
-        result = linprog(c, A_ub=A_group, b_ub=b_group, bounds=bounds_group)
-
-        # 5. Аналіз та збереження результатів
+        A_ub_total = [all_data['Ціна'].values]
+        b_ub_total = [budget]
+        
+        A_lower = -pd.get_dummies(all_data['Канал']).mul(all_data['Ціна'], axis=0).values
+        b_lower = -all_data['Нижня межа'].values
+        A_upper = pd.get_dummies(all_data['Канал']).mul(all_data['Ціна'], axis=0).values
+        b_upper = all_data['Верхня межа'].values
+        
+        A_total = [A_ub_total[0]] + list(A_lower) + list(A_upper)
+        b_total = b_ub_total + list(b_lower) + list(b_upper)
+        
+        result = linprog(c, A_ub=A_total, b_ub=b_total, bounds=(0, None))
+        
         if result.success:
             optimal_slots = result.x.round(0).astype(int)
-            merged_df['Оптимальні слоти'] = optimal_slots
-            merged_df['Оптимальний бюджет'] = optimal_slots * merged_df['Ціна']
-            merged_df['Оптимальна доля (%)'] = (merged_df['Оптимальний бюджет'] / merged_df['Оптимальний бюджет'].sum()) * 100
-            
-            all_results = pd.concat([all_results, merged_df])
-            
-            print(f"\nОптимізація для {sales_house} завершена успішно!")
-            print(merged_df[['Канал', 'Оптимальні слоти', 'Оптимальний бюджет', 'Оптимальна доля (%)']])
-            print("-" * 30)
+            all_data['Оптимальні слоти'] = optimal_slots
+            all_data['Оптимальний бюджет'] = optimal_slots * all_data['Ціна']
+            all_results = all_data
         else:
-            print(f"❌ Помилка оптимізації для {sales_house}:", result.message)
-            print("-" * 30)
-    
-    # 6. Підсумки та експорт
+            print(f"❌ Помилка оптимізації: {result.message}")
+
     if not all_results.empty:
         total_optimized_cost = all_results['Оптимальний бюджет'].sum()
         total_optimized_aff = (all_results['Оптимальні слоти'] * all_results['Aff']).sum()
         total_optimized_trp = (all_results['Оптимальні слоти'] * all_results['TRP']).sum()
+        
+        # Додано розрахунок TRP спліту
+        all_results['TRP_оптимізований_спліт (%)'] = (all_results['Оптимальні слоти'] * all_results['TRP'] / total_optimized_trp) * 100
 
         print("\n📊 Загальні підсумкові показники по всій кампанії:")
         print(f"  - Використаний бюджет: {total_optimized_cost:.2f} грн")
@@ -167,14 +181,20 @@ def optimize_split_by_sales_house_and_ba(standard_data_dict, user_aff_dict, budg
         print(f"  - Загальний TRP: {total_optimized_trp:.2f}")
         print("-" * 30)
         
-        save_results_to_excel(all_results[['Канал', 'СХ', 'Ціна', 'TRP', 'Aff', 'Стандартний бюджет', 'Оптимальний бюджет', 'Оптимальні слоти', 'Оптимальна доля (%)']], f'Оптимізація_результати_{optimization_goal}.xlsx')
+        # Вивід результатів, включаючи TRP спліт
+        print("\n📄 Результати оптимізації:")
+        print(all_results[['Канал', 'СХ', 'Оптимальний бюджет', 'TRP_оптимізований_спліт (%)']])
+        print("-" * 30)
+
+        file_name = f'Оптимізація_результати_{optimization_mode}_{optimization_goal}.xlsx'
+        save_results_to_excel(all_results[['Канал', 'СХ', 'Ціна', 'TRP', 'Aff', 'Стандартний бюджет', 'Оптимальний бюджет', 'Оптимальні слоти', 'TRP_оптимізований_спліт (%)']], file_name)
         
-        plot_split_comparison(all_results, f"Оптимізація за {optimization_goal}")
+        plot_split_comparison(all_results, f"Оптимізація за {optimization_goal} ({'всього' if optimization_mode == 'total' else 'по СХ'})")
     
     return all_results
 
 # --- Приклад використання ---
-# 1. Імітація даних для різних СХ та БА (як окремі словники)
+# Дані для різних СХ та БА (як окремі словники)
 standard_data_by_sh = {
     'Sirius': {
         'Канал': ['ICTV', 'СТБ', 'НОВИЙ', 'ICTV2', 'ТЕТ', 'ОЦЕ', 'МЕГА'],
@@ -205,13 +225,14 @@ user_aff_by_sh = {
     }
 }
 
-# 2. Імітація вибору БА та цілі оптимізації
+# 2. Імітація вибору БА, цілі та режиму оптимізації
 buying_audiences_choice = {
     'Sirius': 'All 18-60',
     'Space': 'W 30+'
 }
 total_budget = 500000
-goal = 'Aff' # Змініть на 'TRP', щоб оптимізувати за TRP
+goal = 'Aff' # 'Aff' або 'TRP'
+mode = 'total' # 'total' або 'per_sh'
 
 # 3. Виклик функції оптимізації
-optimize_split_by_sales_house_and_ba(standard_data_by_sh, user_aff_by_sh, total_budget, buying_audiences_choice, goal)
+optimize_split(standard_data_by_sh, user_aff_by_sh, total_budget, buying_audiences_choice, goal, mode)
