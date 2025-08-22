@@ -26,23 +26,22 @@ def load_data_from_excel(file_path):
     """
     Завантажує дані з вказаного файлу Excel.
     """
+    if not os.path.exists(file_path):
+        print(f"❌ Помилка: Файл '{file_path}' не знайдено.")
+        return None, None
+        
     try:
-        # Читання даних з різних листів
-        standard_data_sheet = "Сп-во"  # <-- Змініть назву листа, якщо вона інша
-        aff_data_sheet = "Оптимізація спліта (викл)" # <-- Змініть назву листа, якщо вона інша
+        standard_data_sheet = "Сп-во"
+        aff_data_sheet = "Оптимізація спліта (викл)"
 
         standard_df = pd.read_excel(file_path, sheet_name=standard_data_sheet, skiprows=1)
-        aff_df = pd.read_excel(file_path, sheet_name=aff_data_sheet, skiprows=7) # <-- Пропуск рядків для таблиці Aff
+        aff_df = pd.read_excel(file_path, sheet_name=aff_data_sheet, skiprows=7)
         
-        # Видалення зайвих стовпців з Aff та перейменування для об'єднання
         aff_df = aff_df.iloc[:, [1, 5]].copy()
         aff_df.columns = ['Канал', 'Aff']
 
         print(f"\n✅ Дані успішно завантажено з файлу '{os.path.basename(file_path)}' з листів '{standard_data_sheet}' та '{aff_data_sheet}'.")
         return standard_df, aff_df
-    except FileNotFoundError:
-        print(f"❌ Помилка: Файл '{file_path}' не знайдено.")
-        return None, None
     except Exception as e:
         print(f"❌ Помилка при читанні файлу Excel: {e}")
         return None, None
@@ -99,8 +98,6 @@ def optimize_split(all_data, budget, buying_audiences, optimization_goal, optimi
     """
     Основна функція для оптимізації канального спліта.
     """
-    
-    # Вибір колонок "Ціна" та "TRP" на основі обраної БА
     all_data = all_data.copy()
     all_data['Ціна'] = all_data.apply(lambda row: row[f'Ціна_{buying_audiences[row["СХ"]]}'], axis=1)
     all_data['TRP'] = all_data.apply(lambda row: row[f'TRP_{buying_audiences[row["СХ"]]}'], axis=1)
@@ -208,17 +205,17 @@ def optimize_split(all_data, budget, buying_audiences, optimization_goal, optimi
 if __name__ == "__main__":
     display_logo()
 
-    # 1. Завантаження даних з Excel
-    excel_file = "Оптимізація спліта.xlsm"  # <--- Завантажте ваш файл в ту ж папку, де знаходиться скрипт
-    standard_df, aff_df = load_data_from_excel(excel_file)
-    
-    if standard_df is None or aff_df is None:
-        sys.exit()
+    # 1. Запит на введення імені файлу
+    while True:
+        excel_file = input("Будь ласка, введіть повну назву вашого Excel-файлу (наприклад, 'data.xlsx'): ")
+        standard_df, aff_df = load_data_from_excel(excel_file)
+        if standard_df is not None and aff_df is not None:
+            break
+        print("Будь ласка, спробуйте ще раз.")
 
     # Об'єднання завантажених даних
     all_data_merged = pd.merge(standard_df, aff_df, on='Канал')
     
-    # Визначення унікальних СХ та доступних БА
     all_sh = all_data_merged['СХ'].unique()
     all_ba = [col.replace('Ціна_', '') for col in all_data_merged.columns if 'Ціна_' in col]
     
